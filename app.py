@@ -24,8 +24,24 @@ def is_same_date(date1, date2):
             date1.month == date2.month and 
             date1.day == date2.day)
 
+def is_cloud_environment():
+    """检查是否在云环境中运行"""
+    return os.environ.get('ZEABUR') == 'true' or not os.environ.get('USER')
+
+@app.route('/api/environment')
+def get_environment():
+    """获取当前运行环境信息"""
+    return jsonify({
+        "is_cloud": is_cloud_environment(),
+        "platform": platform.system()
+    })
+
 def get_mounted_devices():
     """获取已挂载的存储设备"""
+    # 如果在云环境中运行，返回空列表
+    if is_cloud_environment():
+        return []
+        
     devices = []
     system = platform.system()
     
@@ -36,57 +52,43 @@ def get_mounted_devices():
         try:
             # Windows 系统
             if system == "Windows":
-                # 检查是否是可移动设备
                 if 'removable' in partition.opts.lower():
-                    # 获取分区使用情况
                     usage = psutil.disk_usage(partition.mountpoint)
-                    
-                    # 检查是否是SD卡（根据常见的文件夹结构）
                     is_camera_storage = False
+                    
                     try:
-                        # 检查DCIM文件夹
-                        if os.path.exists(os.path.join(partition.mountpoint, "DCIM")):
-                            is_camera_storage = True
-                        # 检查索尼相机的视频文件夹
-                        elif os.path.exists(os.path.join(partition.mountpoint, "PRIVATE", "M4ROOT", "CLIP")):
-                            is_camera_storage = True
-                        # 检查佳能相机的文件夹
-                        elif os.path.exists(os.path.join(partition.mountpoint, "DCIM", "100CANON")):
-                            is_camera_storage = True
-                        # 检查尼康相机的文件夹
-                        elif os.path.exists(os.path.join(partition.mountpoint, "DCIM", "100NIKON")):
-                            is_camera_storage = True
-                        # 检查富士相机的文件夹
-                        elif os.path.exists(os.path.join(partition.mountpoint, "DCIM", "100FUJI")):
-                            is_camera_storage = True
+                        possible_paths = [
+                            os.path.join(partition.mountpoint, "DCIM"),
+                            os.path.join(partition.mountpoint, "PRIVATE", "M4ROOT", "CLIP"),
+                            os.path.join(partition.mountpoint, "DCIM", "100CANON"),
+                            os.path.join(partition.mountpoint, "DCIM", "100NIKON"),
+                            os.path.join(partition.mountpoint, "DCIM", "100FUJI")
+                        ]
+                        
+                        for path in possible_paths:
+                            if os.path.exists(path):
+                                is_camera_storage = True
+                                break
                     except:
                         pass
                         
                     if is_camera_storage:
-                        # 在Windows下获取卷标
-                        import ctypes
-                        kernel32 = ctypes.windll.kernel32
-                        volumeNameBuffer = ctypes.create_unicode_buffer(1024)
-                        fileSystemNameBuffer = ctypes.create_unicode_buffer(1024)
-                        serial_number = None
-                        max_component_length = None
-                        file_system_flags = None
-                        
                         try:
+                            import ctypes
+                            kernel32 = ctypes.windll.kernel32
+                            volumeNameBuffer = ctypes.create_unicode_buffer(1024)
+                            fileSystemNameBuffer = ctypes.create_unicode_buffer(1024)
+                            
                             rc = kernel32.GetVolumeInformationW(
                                 partition.mountpoint,
                                 volumeNameBuffer,
                                 ctypes.sizeof(volumeNameBuffer),
-                                serial_number,
-                                max_component_length,
-                                file_system_flags,
+                                None, None, None,
                                 fileSystemNameBuffer,
                                 ctypes.sizeof(fileSystemNameBuffer)
                             )
-                            if rc:
-                                device_name = volumeNameBuffer.value
-                            else:
-                                device_name = os.path.basename(partition.mountpoint)
+                            
+                            device_name = volumeNameBuffer.value if rc else os.path.basename(partition.mountpoint)
                         except:
                             device_name = os.path.basename(partition.mountpoint)
                             
@@ -101,25 +103,44 @@ def get_mounted_devices():
                         
             # macOS 系统
             elif system == "Darwin" and partition.mountpoint.startswith("/Volumes/"):
-                usage = psutil.disk_usage(partition.mountpoint)
-                is_camera_storage = (
-                    os.path.exists(os.path.join(partition.mountpoint, "DCIM")) or
-                    os.path.exists(os.path.join(partition.mountpoint, "PRIVATE/M4ROOT/CLIP"))
-                )
-                
-                if is_camera_storage:
-                    device_name = os.path.basename(partition.mountpoint)
-                    devices.append({
-                        "name": device_name,
-                        "path": partition.mountpoint,
-                        "total": usage.total,
-                        "used": usage.used,
-                        "free": usage.free,
-                        "type": "SD卡"
-                    })
+                # 跳过系统分区
+                if partition.mountpoint == "/Volumes/Macintosh HD":
+                    continue
                     
-        except (PermissionError, OSError) as e:
-            print(f"Error accessing partition {partition.mountpoint}: {str(e)}")
+                try:
+                    usage = psutil.disk_usage(partition.mountpoint)
+                    is_camera_storage = False
+                    
+                    # 检查常见的相机存储结构
+                    possible_paths = [
+                        os.path.join(partition.mountpoint, "DCIM"),
+                        os.path.join(partition.mountpoint, "PRIVATE/M4ROOT/CLIP"),
+                        os.path.join(partition.mountpoint, "DCIM/100CANON"),
+                        os.path.join(partition.mountpoint, "DCIM/100NIKON"),
+                        os.path.join(partition.mountpoint, "DCIM/100FUJI")
+                    ]
+                    
+                    for path in possible_paths:
+                        if os.path.exists(path):
+                            is_camera_storage = True
+                            break
+                    
+                    if is_camera_storage:
+                        device_name = os.path.basename(partition.mountpoint)
+                        devices.append({
+                            "name": device_name,
+                            "path": partition.mountpoint,
+                            "total": usage.total,
+                            "used": usage.used,
+                            "free": usage.free,
+                            "type": "SD卡"
+                        })
+                except (PermissionError, OSError) as e:
+                    print(f"Error accessing {partition.mountpoint}: {str(e)}")
+                    continue
+                    
+        except Exception as e:
+            print(f"Error processing partition {partition.mountpoint}: {str(e)}")
             continue
             
     return devices
