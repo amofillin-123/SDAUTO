@@ -352,26 +352,6 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
-    <script>
-        // 检查运行环境
-        async function checkEnvironment() {
-            try {
-                const response = await fetch('/api/environment');
-                const data = await response.json();
-                if (data.is_cloud) {
-                    document.getElementById('cloudAlert').style.display = 'block';
-                }
-            } catch (error) {
-                console.error('Error checking environment:', error);
-            }
-        }
-
-        // 页面加载时检查环境
-        document.addEventListener('DOMContentLoaded', function() {
-            checkEnvironment();
-            refreshDevices();
-        });
-    </script>
+    <script src="{{ url_for('static', filename='main.js') }}"></script>
 </body>
 </html>

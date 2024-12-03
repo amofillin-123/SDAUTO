@@ -113,15 +113,22 @@ def get_mounted_devices():
                         
             # macOS 系统
             elif system == "Darwin" and partition.mountpoint.startswith("/Volumes/"):
-                print("检测到 macOS 系统分区")
-                # 跳过系统分区
-                if partition.mountpoint == "/Volumes/Macintosh HD":
-                    print("跳过系统分区")
+                print(f"\n检测到 macOS 外部设备: {partition.mountpoint}")
+                print(f"设备类型: {partition.fstype}")
+                
+                # 跳过系统分区和Time Machine备份
+                if any(x in partition.mountpoint for x in ["Macintosh HD", "Time Machine"]):
+                    print("跳过系统分区或Time Machine备份")
                     continue
                     
                 try:
                     usage = psutil.disk_usage(partition.mountpoint)
-                    print(f"分区大小: {usage.total / (1024*1024*1024):.2f} GB")
+                    size_gb = usage.total / (1024*1024*1024)
+                    print(f"设备大小: {size_gb:.2f} GB")
+                    
+                    # 如果设备小于 128GB，可能是SD卡或U盘
+                    is_small_device = size_gb < 128
+                    print(f"是否为小容量设备: {'是' if is_small_device else '否'}")
                     
                     # 检查常见的相机存储结构
                     possible_paths = [
@@ -129,25 +136,33 @@ def get_mounted_devices():
                         os.path.join(partition.mountpoint, "PRIVATE/M4ROOT/CLIP"),
                         os.path.join(partition.mountpoint, "DCIM/100CANON"),
                         os.path.join(partition.mountpoint, "DCIM/100NIKON"),
-                        os.path.join(partition.mountpoint, "DCIM/100FUJI")
+                        os.path.join(partition.mountpoint, "DCIM/100FUJI"),
+                        os.path.join(partition.mountpoint, "MP_ROOT")  # 部分相机使用此目录
                     ]
                     
-                    print("检查相机文件夹结构:")
+                    is_camera_storage = False
+                    print("\n检查相机文件夹结构:")
                     for path in possible_paths:
                         exists = os.path.exists(path)
                         print(f"- {path}: {'存在' if exists else '不存在'}")
                         if exists:
-                            print("找到相机存储设备！")
-                            device_name = os.path.basename(partition.mountpoint)
-                            devices.append({
-                                "name": device_name,
-                                "path": partition.mountpoint,
-                                "total": usage.total,
-                                "used": usage.used,
-                                "free": usage.free,
-                                "type": "SD卡"
-                            })
+                            is_camera_storage = True
                             break
+                    
+                    # 如果是小容量设备或有相机文件夹结构，就认为是SD卡
+                    if is_small_device or is_camera_storage:
+                        print("检测到SD卡或相机存储设备！")
+                        device_name = os.path.basename(partition.mountpoint)
+                        devices.append({
+                            "name": device_name,
+                            "path": partition.mountpoint,
+                            "total": usage.total,
+                            "used": usage.used,
+                            "free": usage.free,
+                            "type": "SD卡" if is_camera_storage else "可移动存储设备"
+                        })
+                    else:
+                        print("此设备可能是外接硬盘，跳过")
                             
                 except (PermissionError, OSError) as e:
                     print(f"访问分区时出错: {str(e)}")
@@ -166,7 +181,7 @@ def list_devices():
     try:
         devices = get_mounted_devices()
         print(f"返回设备列表: {devices}")
-        return jsonify(devices)
+        return jsonify({"devices": devices})
     except Exception as e:
         print(f"获取设备列表时出错: {str(e)}")
         return jsonify({"error": str(e)}), 500
@@ -174,15 +189,6 @@ def list_devices():
 @app.route('/')
 def index():
     return render_template('index.html')
-
-@app.route('/api/get-devices', methods=['GET'])
-def get_devices():
-    """获取可用的存储设备列表"""
-    try:
-        devices = get_mounted_devices()
-        return jsonify({"devices": devices})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/scan-device', methods=['POST'])
 def scan_device():
