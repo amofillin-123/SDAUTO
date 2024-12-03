@@ -38,8 +38,13 @@ def get_environment():
 
 def get_mounted_devices():
     """获取已挂载的存储设备"""
+    print("开始检测存储设备...")
+    print(f"运行环境: {'云端' if is_cloud_environment() else '本地'}")
+    print(f"操作系统: {platform.system()}")
+    
     # 如果在云环境中运行，返回空列表
     if is_cloud_environment():
+        print("检测到云环境，跳过设备检测")
         return []
         
     devices = []
@@ -47,8 +52,13 @@ def get_mounted_devices():
     
     # 获取所有磁盘分区
     partitions = psutil.disk_partitions(all=True)
+    print(f"检测到 {len(partitions)} 个分区")
     
     for partition in partitions:
+        print(f"\n检查分区: {partition.mountpoint}")
+        print(f"分区类型: {partition.fstype}")
+        print(f"分区选项: {partition.opts}")
+        
         try:
             # Windows 系统
             if system == "Windows":
@@ -103,13 +113,15 @@ def get_mounted_devices():
                         
             # macOS 系统
             elif system == "Darwin" and partition.mountpoint.startswith("/Volumes/"):
+                print("检测到 macOS 系统分区")
                 # 跳过系统分区
                 if partition.mountpoint == "/Volumes/Macintosh HD":
+                    print("跳过系统分区")
                     continue
                     
                 try:
                     usage = psutil.disk_usage(partition.mountpoint)
-                    is_camera_storage = False
+                    print(f"分区大小: {usage.total / (1024*1024*1024):.2f} GB")
                     
                     # 检查常见的相机存储结构
                     possible_paths = [
@@ -120,85 +132,44 @@ def get_mounted_devices():
                         os.path.join(partition.mountpoint, "DCIM/100FUJI")
                     ]
                     
+                    print("检查相机文件夹结构:")
                     for path in possible_paths:
-                        if os.path.exists(path):
-                            is_camera_storage = True
+                        exists = os.path.exists(path)
+                        print(f"- {path}: {'存在' if exists else '不存在'}")
+                        if exists:
+                            print("找到相机存储设备！")
+                            device_name = os.path.basename(partition.mountpoint)
+                            devices.append({
+                                "name": device_name,
+                                "path": partition.mountpoint,
+                                "total": usage.total,
+                                "used": usage.used,
+                                "free": usage.free,
+                                "type": "SD卡"
+                            })
                             break
-                    
-                    if is_camera_storage:
-                        device_name = os.path.basename(partition.mountpoint)
-                        devices.append({
-                            "name": device_name,
-                            "path": partition.mountpoint,
-                            "total": usage.total,
-                            "used": usage.used,
-                            "free": usage.free,
-                            "type": "SD卡"
-                        })
+                            
                 except (PermissionError, OSError) as e:
-                    print(f"Error accessing {partition.mountpoint}: {str(e)}")
+                    print(f"访问分区时出错: {str(e)}")
                     continue
                     
         except Exception as e:
-            print(f"Error processing partition {partition.mountpoint}: {str(e)}")
+            print(f"处理分区时出错: {str(e)}")
             continue
             
+    print(f"\n找到 {len(devices)} 个存储设备")
     return devices
 
-def get_video_thumbnail_path(video_path):
-    """获取视频对应的缩略图路径"""
-    if not video_path.startswith('/Volumes/Untitled/PRIVATE/M4ROOT/CLIP/'):
-        return None
-        
-    # 从视频路径中提取文件名
-    video_name = os.path.basename(video_path)
-    video_name_without_ext = os.path.splitext(video_name)[0]
-    
-    # 构建缩略图路径 (添加T01后缀)
-    thumbnail_path = f'/Volumes/Untitled/PRIVATE/M4ROOT/THMBNL/{video_name_without_ext}T01.JPG'
-    
-    if os.path.exists(thumbnail_path):
-        return thumbnail_path
-    return None
-
-def generate_thumbnail(file_path, size=(150, 150)):
-    """生成缩略图"""
+@app.route('/api/devices')
+def list_devices():
+    """列出可用的存储设备"""
     try:
-        # 如果是视频文件，尝试获取其缩略图
-        if file_path.lower().endswith(('.mp4', '.mov', '.mxf')):
-            thumb_path = get_video_thumbnail_path(file_path)
-            if thumb_path:
-                try:
-                    # 直接打开 JPG 缩略图文件
-                    with Image.open(thumb_path) as img:
-                        # 保持纵横比
-                        img.thumbnail(size)
-                        # 将图片转换为字节流
-                        thumb_io = io.BytesIO()
-                        img.save(thumb_io, 'JPEG', quality=85)
-                        thumb_io.seek(0)
-                        return thumb_io
-                except Exception as e:
-                    print(f"Error processing thumbnail file {thumb_path}: {str(e)}")
-                    return None
-        
-        # 检查文件类型
-        mime_type, _ = mimetypes.guess_type(file_path)
-        if not mime_type or not mime_type.startswith('image/'):
-            return None
-            
-        # 打开图片并生成缩略图
-        with Image.open(file_path) as img:
-            # 保持纵横比
-            img.thumbnail(size)
-            # 将图片转换为字节流
-            thumb_io = io.BytesIO()
-            img.save(thumb_io, 'JPEG', quality=85)
-            thumb_io.seek(0)
-            return thumb_io
+        devices = get_mounted_devices()
+        print(f"返回设备列表: {devices}")
+        return jsonify(devices)
     except Exception as e:
-        print(f"Error generating thumbnail for {file_path}: {str(e)}")
-        return None
+        print(f"获取设备列表时出错: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/')
 def index():
@@ -487,6 +458,61 @@ def get_folder_path():
     except Exception as e:
         print(f"获取文件夹路径时出错: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+def get_video_thumbnail_path(video_path):
+    """获取视频对应的缩略图路径"""
+    if not video_path.startswith('/Volumes/Untitled/PRIVATE/M4ROOT/CLIP/'):
+        return None
+        
+    # 从视频路径中提取文件名
+    video_name = os.path.basename(video_path)
+    video_name_without_ext = os.path.splitext(video_name)[0]
+    
+    # 构建缩略图路径 (添加T01后缀)
+    thumbnail_path = f'/Volumes/Untitled/PRIVATE/M4ROOT/THMBNL/{video_name_without_ext}T01.JPG'
+    
+    if os.path.exists(thumbnail_path):
+        return thumbnail_path
+    return None
+
+def generate_thumbnail(file_path, size=(150, 150)):
+    """生成缩略图"""
+    try:
+        # 如果是视频文件，尝试获取其缩略图
+        if file_path.lower().endswith(('.mp4', '.mov', '.mxf')):
+            thumb_path = get_video_thumbnail_path(file_path)
+            if thumb_path:
+                try:
+                    # 直接打开 JPG 缩略图文件
+                    with Image.open(thumb_path) as img:
+                        # 保持纵横比
+                        img.thumbnail(size)
+                        # 将图片转换为字节流
+                        thumb_io = io.BytesIO()
+                        img.save(thumb_io, 'JPEG', quality=85)
+                        thumb_io.seek(0)
+                        return thumb_io
+                except Exception as e:
+                    print(f"Error processing thumbnail file {thumb_path}: {str(e)}")
+                    return None
+        
+        # 检查文件类型
+        mime_type, _ = mimetypes.guess_type(file_path)
+        if not mime_type or not mime_type.startswith('image/'):
+            return None
+            
+        # 打开图片并生成缩略图
+        with Image.open(file_path) as img:
+            # 保持纵横比
+            img.thumbnail(size)
+            # 将图片转换为字节流
+            thumb_io = io.BytesIO()
+            img.save(thumb_io, 'JPEG', quality=85)
+            thumb_io.seek(0)
+            return thumb_io
+    except Exception as e:
+        print(f"Error generating thumbnail for {file_path}: {str(e)}")
+        return None
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 3000))
