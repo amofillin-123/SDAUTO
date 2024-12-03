@@ -55,7 +55,7 @@ function createDeviceElement(device) {
     div.className = 'device-item';
     div.onclick = () => selectDevice(device);
     
-    const usedSpace = (device.used / device.total * 100).toFixed(1);
+    const usedSpace = device.total > 0 ? (device.used / device.total * 100).toFixed(1) : 0;
     const freeSpace = formatSize(device.free);
     
     div.innerHTML = `
@@ -63,6 +63,7 @@ function createDeviceElement(device) {
             <div>
                 <h5 class="mb-1">${device.name}</h5>
                 <small class="text-muted">类型: ${device.type}</small>
+                ${device.isManual ? `<br><small class="text-muted">文件数量: ${device.files.length}</small>` : ''}
             </div>
             <div class="text-end">
                 <div class="progress" style="width: 100px;">
@@ -73,7 +74,9 @@ function createDeviceElement(device) {
                          aria-valuemax="100">
                     </div>
                 </div>
-                <small class="text-muted">可用: ${freeSpace}</small>
+                ${device.isManual ? 
+                    `<small class="text-muted">总大小: ${formatSize(device.total)}</small>` :
+                    `<small class="text-muted">可用: ${freeSpace}</small>`}
             </div>
         </div>
     `;
@@ -106,6 +109,147 @@ function formatSize(bytes) {
     }
     
     return `${size.toFixed(1)} ${units[unitIndex]}`;
+}
+
+// 处理文件夹选择
+async function handleFolderSelect(input) {
+    const files = Array.from(input.files);
+    if (files.length > 0) {
+        const folderPath = files[0].webkitRelativePath.split('/')[0];
+        
+        try {
+            const response = await fetch('/api/scan-manual-folder', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    path: folderPath
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            addManualDevice(folderPath, data.files);
+            
+        } catch (error) {
+            console.error('扫描文件夹时出错:', error);
+            alert('扫描文件夹时出错，请重试');
+        }
+    }
+}
+
+// 添加手动选择的设备
+function addManualDevice(folderPath, files) {
+    const totalSize = files.reduce((acc, file) => acc + file.size, 0);
+    const deviceElement = createDeviceElement({
+        name: folderPath,
+        path: folderPath,
+        type: "手动选择的文件夹",
+        total: totalSize,
+        used: totalSize,
+        free: 0,
+        files: files,
+        isManual: true
+    });
+    
+    const deviceList = document.getElementById('deviceList');
+    // 如果列表为空或只有"未检测到设备"的提示，则清空列表
+    if (!deviceList.children.length || deviceList.innerHTML.includes('未检测到存储设备')) {
+        deviceList.innerHTML = '';
+    }
+    deviceList.appendChild(deviceElement);
+}
+
+// 复制选中的文件
+async function copyFiles(files, targetFolder) {
+    try {
+        const response = await fetch('/api/copy-manual-files', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                files: files,
+                target_folder: targetFolder
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        alert(`成功复制 ${result.total_copied} 个文件`);
+        
+    } catch (error) {
+        console.error('复制文件时出错:', error);
+        alert('复制文件时出错，请重试');
+    }
+}
+
+// 初始化拖放区域
+document.addEventListener('DOMContentLoaded', () => {
+    const dropZone = document.getElementById('dropZone');
+    
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('border-primary');
+    });
+    
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('border-primary');
+    });
+    
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('border-primary');
+        
+        const items = e.dataTransfer.items;
+        if (items) {
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i].webkitGetAsEntry();
+                if (item && item.isDirectory) {
+                    handleDroppedFolder(item);
+                    break;
+                }
+            }
+        }
+    });
+});
+
+// 处理拖放的文件夹
+async function handleDroppedFolder(folderEntry) {
+    const files = await readFolderContents(folderEntry);
+    addManualDevice(folderEntry.name, files);
+}
+
+// 递归读取文件夹内容
+async function readFolderContents(folderEntry) {
+    const files = [];
+    
+    async function readEntry(entry) {
+        if (entry.isFile) {
+            const file = await new Promise((resolve) => {
+                entry.file(resolve);
+            });
+            files.push(file);
+        } else if (entry.isDirectory) {
+            const reader = entry.createReader();
+            const entries = await new Promise((resolve) => {
+                reader.readEntries(resolve);
+            });
+            for (const childEntry of entries) {
+                await readEntry(childEntry);
+            }
+        }
+    }
+    
+    await readEntry(folderEntry);
+    return files;
 }
 
 // 定期刷新设备列表

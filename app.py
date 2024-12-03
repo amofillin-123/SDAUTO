@@ -520,6 +520,90 @@ def generate_thumbnail(file_path, size=(150, 150)):
         print(f"Error generating thumbnail for {file_path}: {str(e)}")
         return None
 
+@app.route('/api/scan-manual-folder', methods=['POST'])
+def scan_manual_folder():
+    """扫描手动选择的文件夹"""
+    try:
+        data = request.json
+        folder_path = data.get('path')
+        
+        if not folder_path:
+            return jsonify({"error": "未提供文件夹路径"}), 400
+            
+        # 获取文件夹中的所有文件
+        files = []
+        for root, _, filenames in os.walk(folder_path):
+            for filename in filenames:
+                file_path = os.path.join(root, filename)
+                # 获取文件信息
+                try:
+                    stat = os.stat(file_path)
+                    file_date = get_file_date(file_path)
+                    
+                    # 检查是否是图片或视频文件
+                    mime_type, _ = mimetypes.guess_type(file_path)
+                    if mime_type and (mime_type.startswith('image/') or mime_type.startswith('video/')):
+                        files.append({
+                            'path': file_path,
+                            'name': filename,
+                            'size': stat.st_size,
+                            'date': file_date.strftime('%Y-%m-%d %H:%M:%S'),
+                            'type': 'image' if mime_type.startswith('image/') else 'video'
+                        })
+                except Exception as e:
+                    print(f"处理文件 {file_path} 时出错: {str(e)}")
+                    continue
+        
+        return jsonify({
+            'files': files,
+            'total_count': len(files)
+        })
+        
+    except Exception as e:
+        print(f"扫描文件夹时出错: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/copy-manual-files', methods=['POST'])
+def copy_manual_files():
+    """复制手动选择的文件"""
+    try:
+        data = request.json
+        source_files = data.get('files', [])
+        target_folder = data.get('target_folder')
+        
+        if not source_files or not target_folder:
+            return jsonify({"error": "参数不完整"}), 400
+            
+        # 确保目标文件夹存在
+        os.makedirs(target_folder, exist_ok=True)
+        
+        copied_files = []
+        for file_info in source_files:
+            source_path = file_info['path']
+            file_date = datetime.strptime(file_info['date'], '%Y-%m-%d %H:%M:%S')
+            
+            # 创建日期子文件夹
+            date_folder = os.path.join(target_folder, file_date.strftime('%Y-%m-%d'))
+            os.makedirs(date_folder, exist_ok=True)
+            
+            # 复制文件
+            target_path = os.path.join(date_folder, os.path.basename(source_path))
+            shutil.copy2(source_path, target_path)
+            copied_files.append({
+                'source': source_path,
+                'target': target_path
+            })
+        
+        return jsonify({
+            'success': True,
+            'copied_files': copied_files,
+            'total_copied': len(copied_files)
+        })
+        
+    except Exception as e:
+        print(f"复制文件时出错: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 3000))
     app.run(host='0.0.0.0', port=port)
