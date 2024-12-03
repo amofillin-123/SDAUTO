@@ -8,6 +8,7 @@ import json
 from PIL import Image
 import io
 import mimetypes
+import shutil
 
 app = Flask(__name__)
 
@@ -26,18 +27,81 @@ def is_same_date(date1, date2):
 def get_mounted_devices():
     """获取已挂载的存储设备"""
     devices = []
+    system = platform.system()
     
     # 获取所有磁盘分区
     partitions = psutil.disk_partitions(all=True)
     
     for partition in partitions:
         try:
-            # 在macOS上，可移动设备通常挂载在/Volumes下
-            if platform.system() == "Darwin" and partition.mountpoint.startswith("/Volumes/"):
-                # 获取分区使用情况
+            # Windows 系统
+            if system == "Windows":
+                # 检查是否是可移动设备
+                if 'removable' in partition.opts.lower():
+                    # 获取分区使用情况
+                    usage = psutil.disk_usage(partition.mountpoint)
+                    
+                    # 检查是否是SD卡（根据常见的文件夹结构）
+                    is_camera_storage = False
+                    try:
+                        # 检查DCIM文件夹
+                        if os.path.exists(os.path.join(partition.mountpoint, "DCIM")):
+                            is_camera_storage = True
+                        # 检查索尼相机的视频文件夹
+                        elif os.path.exists(os.path.join(partition.mountpoint, "PRIVATE", "M4ROOT", "CLIP")):
+                            is_camera_storage = True
+                        # 检查佳能相机的文件夹
+                        elif os.path.exists(os.path.join(partition.mountpoint, "DCIM", "100CANON")):
+                            is_camera_storage = True
+                        # 检查尼康相机的文件夹
+                        elif os.path.exists(os.path.join(partition.mountpoint, "DCIM", "100NIKON")):
+                            is_camera_storage = True
+                        # 检查富士相机的文件夹
+                        elif os.path.exists(os.path.join(partition.mountpoint, "DCIM", "100FUJI")):
+                            is_camera_storage = True
+                    except:
+                        pass
+                        
+                    if is_camera_storage:
+                        # 在Windows下获取卷标
+                        import ctypes
+                        kernel32 = ctypes.windll.kernel32
+                        volumeNameBuffer = ctypes.create_unicode_buffer(1024)
+                        fileSystemNameBuffer = ctypes.create_unicode_buffer(1024)
+                        serial_number = None
+                        max_component_length = None
+                        file_system_flags = None
+                        
+                        try:
+                            rc = kernel32.GetVolumeInformationW(
+                                partition.mountpoint,
+                                volumeNameBuffer,
+                                ctypes.sizeof(volumeNameBuffer),
+                                serial_number,
+                                max_component_length,
+                                file_system_flags,
+                                fileSystemNameBuffer,
+                                ctypes.sizeof(fileSystemNameBuffer)
+                            )
+                            if rc:
+                                device_name = volumeNameBuffer.value
+                            else:
+                                device_name = os.path.basename(partition.mountpoint)
+                        except:
+                            device_name = os.path.basename(partition.mountpoint)
+                            
+                        devices.append({
+                            "name": device_name or f"可移动磁盘 ({partition.mountpoint})",
+                            "path": partition.mountpoint,
+                            "total": usage.total,
+                            "used": usage.used,
+                            "free": usage.free,
+                            "type": "SD卡"
+                        })
+                        
+            # macOS 系统
+            elif system == "Darwin" and partition.mountpoint.startswith("/Volumes/"):
                 usage = psutil.disk_usage(partition.mountpoint)
-                
-                # 检查是否是SD卡（根据常见的文件夹结构）
                 is_camera_storage = (
                     os.path.exists(os.path.join(partition.mountpoint, "DCIM")) or
                     os.path.exists(os.path.join(partition.mountpoint, "PRIVATE/M4ROOT/CLIP"))
@@ -53,10 +117,11 @@ def get_mounted_devices():
                         "free": usage.free,
                         "type": "SD卡"
                     })
-                
-        except (PermissionError, OSError):
+                    
+        except (PermissionError, OSError) as e:
+            print(f"Error accessing partition {partition.mountpoint}: {str(e)}")
             continue
-    
+            
     return devices
 
 def get_video_thumbnail_path(video_path):
@@ -202,51 +267,66 @@ def scan_device():
 
 @app.route('/api/copy-files', methods=['POST'])
 def copy_files():
-    """复制选中的文件到目标目录"""
-    data = request.json
-    files = data.get('files', [])
-    
-    # 创建目标目录
-    target_dir = os.path.expanduser('~/Desktop/照片备份')
-    if not os.path.exists(target_dir):
-        os.makedirs(target_dir)
+    """复制文件到指定目录"""
+    try:
+        data = request.json
+        files = data.get('files', [])
+        target_folder = data.get('targetFolder')
         
-    result = {
-        "success": [],
-        "failed": []
-    }
-    
-    import shutil
-    for file_path in files:
-        try:
-            if os.path.exists(file_path):
+        if not files:
+            return jsonify({"error": "未选择任何文件"}), 400
+            
+        if not target_folder:
+            return jsonify({"error": "未指定目标文件夹"}), 400
+            
+        # 确保目标文件夹存在
+        if not os.path.exists(target_folder):
+            return jsonify({"error": "目标文件夹不存在"}), 400
+            
+        # 复制文件
+        success_count = 0
+        failed_files = []
+        
+        for file_path in files:
+            try:
+                if not os.path.exists(file_path):
+                    failed_files.append({"file": file_path, "error": "文件不存在"})
+                    continue
+                    
+                # 获取文件名
                 file_name = os.path.basename(file_path)
-                target_path = os.path.join(target_dir, file_name)
+                # 构建目标文件路径
+                dest_path = os.path.join(target_folder, file_name)
                 
                 # 如果目标文件已存在，添加数字后缀
+                base_name, ext = os.path.splitext(file_name)
                 counter = 1
-                while os.path.exists(target_path):
-                    name, ext = os.path.splitext(file_name)
-                    target_path = os.path.join(target_dir, f"{name}_{counter}{ext}")
+                while os.path.exists(dest_path):
+                    dest_path = os.path.join(target_folder, f"{base_name}_{counter}{ext}")
                     counter += 1
                 
-                shutil.copy2(file_path, target_path)
-                result["success"].append({
-                    "source": file_path,
-                    "target": target_path
-                })
-            else:
-                result["failed"].append({
-                    "file": file_path,
-                    "error": "文件不存在"
-                })
-        except Exception as e:
-            result["failed"].append({
-                "file": file_path,
-                "error": str(e)
-            })
-    
-    return jsonify(result)
+                # 复制文件
+                shutil.copy2(file_path, dest_path)
+                success_count += 1
+                
+            except Exception as e:
+                failed_files.append({"file": file_path, "error": str(e)})
+        
+        # 准备返回信息
+        result = {
+            "message": f"成功复制 {success_count} 个文件到 {target_folder}",
+            "targetPath": target_folder,
+            "successCount": success_count,
+            "failedFiles": failed_files
+        }
+        
+        if failed_files:
+            result["warning"] = f"有 {len(failed_files)} 个文件复制失败"
+            
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/create-folder-and-copy', methods=['POST'])
 def create_folder_and_copy():
@@ -339,5 +419,54 @@ def open_file_location():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/get-folder-path', methods=['POST'])
+def get_folder_path():
+    """获取拖放文件夹的完整路径"""
+    try:
+        data = request.json
+        folder_name = data.get('folderName')
+        
+        if not folder_name:
+            return jsonify({"error": "未提供文件夹名称"}), 400
+            
+        # 在常见位置查找文件夹
+        possible_locations = [
+            os.path.expanduser("~/Desktop"),  # 桌面
+            os.path.expanduser("~/Downloads"),  # 下载文件夹
+            "/Volumes"  # 外部设备
+        ]
+        
+        # 遍历所有可能的位置
+        for location in possible_locations:
+            if os.path.exists(location):
+                for root, dirs, _ in os.walk(location):
+                    if folder_name in dirs:
+                        folder_path = os.path.join(root, folder_name)
+                        # 验证这是我们要找的文件夹
+                        try:
+                            folder_stat = os.stat(folder_path)
+                            # 如果提供了修改时间，可以用来进一步验证
+                            if 'modificationTime' in data:
+                                # 转换时间戳（毫秒转秒）
+                                mod_time = data['modificationTime'] / 1000
+                                # 允许1秒的误差
+                                if abs(folder_stat.st_mtime - mod_time) > 1:
+                                    continue
+                            
+                            # 如果提供了大小信息，可以用来进一步验证
+                            if 'size' in data and folder_stat.st_size != data['size']:
+                                continue
+                                
+                            return jsonify({"path": folder_path})
+                        except OSError:
+                            continue
+        
+        return jsonify({"error": "找不到指定的文件夹"}), 404
+        
+    except Exception as e:
+        print(f"获取文件夹路径时出错: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
-    app.run(debug=True, port=3000)
+    port = int(os.environ.get('PORT', 3000))
+    app.run(host='0.0.0.0', port=port)

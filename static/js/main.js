@@ -1,7 +1,6 @@
 document.addEventListener('DOMContentLoaded', function() {
     const deviceList = document.getElementById('deviceList');
     const refreshButton = document.getElementById('refreshDevices');
-    const copyButton = document.getElementById('copyFiles');
     const createFolderButton = document.getElementById('createFolder');
     const folderNameInput = document.getElementById('folderName');
     const scanDateInput = document.getElementById('scanDate');
@@ -11,11 +10,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const videoCount = document.getElementById('videoCount');
     const selectAllPhotos = document.getElementById('selectAllPhotos');
     const selectAllVideos = document.getElementById('selectAllVideos');
+    const dropZone = document.getElementById('dropZone');
+    const folderInput = document.getElementById('folderInput');
     
     // 存储当前选中的设备路径和选中的文件
     let selectedDevicePath = null;
     let selectedFiles = new Set();
-    
+    let targetFolder = null;
+
     // 设置日期选择框的默认值为今天
     const today = new Date();
     scanDateInput.value = today.toISOString().split('T')[0];
@@ -25,8 +27,52 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // 绑定按钮事件
     refreshButton.addEventListener('click', loadDevices);
-    copyButton.addEventListener('click', copySelectedFiles);
     
+    // 监听日期变化，自动重新扫描
+    scanDateInput.addEventListener('change', () => {
+        if (selectedDevicePath) {
+            scanDevice(selectedDevicePath, scanDateInput.value);
+        }
+    });
+    
+    // 监听文件夹名称输入
+    folderNameInput.addEventListener('input', () => {
+        createFolderButton.disabled = !folderNameInput.value.trim() || selectedFiles.size === 0;
+    });
+
+    // 全选照片
+    selectAllPhotos.addEventListener('change', function() {
+        const photoItems = photoList.querySelectorAll('.file-item');
+        photoItems.forEach(item => {
+            if (this.checked) {
+                item.classList.add('selected');
+                selectedFiles.add(item.getAttribute('data-file-path'));
+            } else {
+                item.classList.remove('selected');
+                selectedFiles.delete(item.getAttribute('data-file-path'));
+            }
+        });
+        updateSelectAllState();
+    });
+
+    // 全选视频
+    selectAllVideos.addEventListener('change', function() {
+        const videoItems = videoList.querySelectorAll('.file-item');
+        videoItems.forEach(item => {
+            if (this.checked) {
+                item.classList.add('selected');
+                selectedFiles.add(item.getAttribute('data-file-path'));
+            } else {
+                item.classList.remove('selected');
+                selectedFiles.delete(item.getAttribute('data-file-path'));
+            }
+        });
+        updateSelectAllState();
+    });
+
+    // 初始化拖放区域
+    initializeDropZone();
+
     // 加载设备列表
     async function loadDevices() {
         try {
@@ -147,7 +193,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             
             // 显示文件列表
-            displayFiles([...data.photos, ...data.videos]);
+            displayFiles(data.photos, data.videos);
             
         } catch (error) {
             console.error('Error scanning device:', error);
@@ -161,110 +207,37 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
-    // 监听日期变化，自动重新扫描
-    scanDateInput.addEventListener('change', () => {
-        if (selectedDevicePath) {
-            scanDevice(selectedDevicePath, scanDateInput.value);
-        }
-    });
-    
-    // 监听文件夹名称输入
-    folderNameInput.addEventListener('input', () => {
-        createFolderButton.disabled = !folderNameInput.value.trim() || selectedFiles.size === 0;
-    });
-
-    // 全选照片
-    selectAllPhotos.addEventListener('change', function() {
-        const photoItems = photoList.querySelectorAll('.file-item');
-        photoItems.forEach(item => {
-            if (this.checked) {
-                item.classList.add('selected');
-                selectedFiles.add(item.getAttribute('data-file-path'));
-            } else {
-                item.classList.remove('selected');
-                selectedFiles.delete(item.getAttribute('data-file-path'));
-            }
-        });
-        updateCopyButton();
-    });
-
-    // 全选视频
-    selectAllVideos.addEventListener('change', function() {
-        const videoItems = videoList.querySelectorAll('.file-item');
-        videoItems.forEach(item => {
-            if (this.checked) {
-                item.classList.add('selected');
-                selectedFiles.add(item.getAttribute('data-file-path'));
-            } else {
-                item.classList.remove('selected');
-                selectedFiles.delete(item.getAttribute('data-file-path'));
-            }
-        });
-        updateCopyButton();
-    });
-
-    // 更新全选框状态
-    function updateSelectAllState() {
-        const photoItems = photoList.querySelectorAll('.file-item');
-        const videoItems = videoList.querySelectorAll('.file-item');
-        
-        const photoSelected = Array.from(photoItems).filter(item => item.classList.contains('selected'));
-        const videoSelected = Array.from(videoItems).filter(item => item.classList.contains('selected'));
-        
-        selectAllPhotos.checked = photoItems.length > 0 && photoSelected.length === photoItems.length;
-        selectAllPhotos.indeterminate = photoSelected.length > 0 && photoSelected.length < photoItems.length;
-        
-        selectAllVideos.checked = videoItems.length > 0 && videoSelected.length === videoItems.length;
-        selectAllVideos.indeterminate = videoSelected.length > 0 && videoSelected.length < videoItems.length;
-    }
-    
     // 显示文件列表
-    function displayFiles(files) {
-        const photos = [];
-        const videos = [];
-        
-        files.forEach(file => {
-            if (file.name.toLowerCase().match(/\.(jpg|jpeg|png|gif|raw|arw)$/)) {
-                photos.push(file);
-            } else if (file.name.toLowerCase().match(/\.(mp4|mov|mxf)$/)) {
-                videos.push(file);
-            }
-        });
-        
-        // 更新计数
-        photoCount.textContent = `${photos.length} 个文件`;
-        videoCount.textContent = `${videos.length} 个文件`;
-        
-        // 清空现有内容和全选状态
+    function displayFiles(photos, videos) {
+        // 清空列表
         photoList.innerHTML = '';
         videoList.innerHTML = '';
-        selectAllPhotos.checked = false;
-        selectAllPhotos.indeterminate = false;
-        selectAllVideos.checked = false;
-        selectAllVideos.indeterminate = false;
         selectedFiles.clear();
         
-        // 显示照片
-        photos.forEach(file => {
-            const fileElement = createFileElement(file);
-            photoList.appendChild(fileElement);
-        });
-        
-        // 显示视频
-        videos.forEach(file => {
-            const fileElement = createFileElement(file);
-            videoList.appendChild(fileElement);
-        });
-        
-        // 如果没有文件，显示提示
-        if (photos.length === 0) {
+        // 更新照片列表
+        if (photos.length > 0) {
+            photos.forEach(photo => {
+                const photoElement = createFileElement(photo);
+                photoList.appendChild(photoElement);
+            });
+        } else {
             photoList.innerHTML = '<div class="alert alert-info">没有找到照片</div>';
         }
-        if (videos.length === 0) {
+        
+        // 更新视频列表
+        if (videos.length > 0) {
+            videos.forEach(video => {
+                const videoElement = createFileElement(video);
+                videoList.appendChild(videoElement);
+            });
+        } else {
             videoList.innerHTML = '<div class="alert alert-info">没有找到视频</div>';
         }
         
-        updateCopyButton();
+        // 更新计数
+        updateFileCount();
+        // 更新全选框状态
+        updateSelectAllState();
     }
     
     // 创建文件元素
@@ -273,30 +246,46 @@ document.addEventListener('DOMContentLoaded', function() {
         fileElement.className = 'file-item mb-2';
         fileElement.setAttribute('data-file-path', file.path);
 
-        // 添加缩略图容器
+        // 创建缩略图容器
         const thumbnailContainer = document.createElement('div');
         thumbnailContainer.className = 'thumbnail-container me-2';
+        thumbnailContainer.style.cssText = 'width: 60px; height: 60px; overflow: hidden; flex-shrink: 0;';
+
+        // 创建缩略图
         const thumbnail = document.createElement('img');
-        // 修复缩略图 URL：移除开头的斜杠
-        const thumbnailPath = file.path.startsWith('/') ? file.path.substring(1) : file.path;
-        thumbnail.src = `/api/thumbnail/${encodeURIComponent(thumbnailPath)}`;
-        thumbnail.className = 'thumbnail';
+        thumbnail.src = `/api/thumbnail${file.path}`;
         thumbnail.alt = file.name;
+        thumbnail.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
+        thumbnail.onerror = function() {
+            this.src = '/static/img/file-icon.png';
+        };
         thumbnailContainer.appendChild(thumbnail);
-        fileElement.appendChild(thumbnailContainer);
 
-        // 添加文件名
-        const fileName = document.createElement('div');
-        fileName.className = 'file-info';
-        fileName.textContent = file.name;
-        fileElement.appendChild(fileName);
+        // 创建文件信息容器
+        const fileInfo = document.createElement('div');
+        fileInfo.className = 'flex-grow-1';
+        fileInfo.innerHTML = `
+            <div class="file-name">${file.name}</div>
+            <div class="file-info">
+                <small class="text-muted">
+                    大小: ${formatFileSize(file.size)}
+                    <br>
+                    日期: ${file.date}
+                </small>
+            </div>
+        `;
 
-        // 添加跳转按钮
+        // 创建按钮容器
+        const buttonsContainer = document.createElement('div');
+        buttonsContainer.className = 'd-flex align-items-center';
+        buttonsContainer.style.marginLeft = '10px';
+
+        // 创建跳转按钮
         const openLocationBtn = document.createElement('button');
-        openLocationBtn.className = 'btn btn-link open-location-btn';
-        openLocationBtn.innerHTML = '<i class="bi bi-folder2-open"></i>';
+        openLocationBtn.className = 'btn btn-link btn-sm me-2';
         openLocationBtn.title = '在访达中显示';
-        openLocationBtn.addEventListener('click', async (event) => {
+        openLocationBtn.innerHTML = '<i class="bi bi-folder2-open"></i>';
+        openLocationBtn.onclick = async (event) => {
             event.stopPropagation();
             try {
                 const response = await fetch('/api/open-file-location', {
@@ -309,42 +298,47 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 if (!response.ok) {
                     const data = await response.json();
-                    alert(data.error || '无法打开文件位置');
+                    throw new Error(data.error || '无法打开文件位置');
                 }
             } catch (error) {
                 console.error('Error:', error);
-                alert('打开文件位置时出错');
+                alert('打开文件位置时出错: ' + error.message);
             }
-        });
-        fileElement.appendChild(openLocationBtn);
+        };
 
-        // 添加删除按钮
+        // 创建删除按钮
         const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'btn btn-link delete-btn';
-        deleteBtn.innerHTML = '<i class="bi bi-x"></i>';
-        deleteBtn.addEventListener('click', (event) => {
+        deleteBtn.className = 'btn btn-link btn-sm text-danger';
+        deleteBtn.title = '移除';
+        deleteBtn.innerHTML = '<i class="bi bi-x-lg"></i>';
+        deleteBtn.onclick = (event) => {
             event.stopPropagation();
             fileElement.remove();
+            selectedFiles.delete(file.path);
             updateFileCount();
-            
-            // 如果文件已被选中，从选中集合中移除
-            const filePath = fileElement.getAttribute('data-file-path');
-            selectedFiles.delete(filePath);
-            
-            // 更新全选框状态
             updateSelectAllState();
-        });
-        fileElement.appendChild(deleteBtn);
+        };
 
-        // 添加点击选择事件
+        // 添加按钮到按钮容器
+        buttonsContainer.appendChild(openLocationBtn);
+        buttonsContainer.appendChild(deleteBtn);
+
+        // 创建主容器
+        const container = document.createElement('div');
+        container.className = 'd-flex align-items-center';
+        container.appendChild(thumbnailContainer);
+        container.appendChild(fileInfo);
+        container.appendChild(buttonsContainer);
+
+        fileElement.appendChild(container);
+
+        // 点击选择
         fileElement.addEventListener('click', () => {
-            const filePath = fileElement.getAttribute('data-file-path');
+            fileElement.classList.toggle('selected');
             if (fileElement.classList.contains('selected')) {
-                fileElement.classList.remove('selected');
-                selectedFiles.delete(filePath);
+                selectedFiles.add(file.path);
             } else {
-                fileElement.classList.add('selected');
-                selectedFiles.add(filePath);
+                selectedFiles.delete(file.path);
             }
             updateSelectAllState();
         });
@@ -352,97 +346,42 @@ document.addEventListener('DOMContentLoaded', function() {
         return fileElement;
     }
     
-    // 创建文件夹并复制文件
-    createFolderButton.addEventListener('click', async () => {
-        const folderName = folderNameInput.value.trim();
-        if (!folderName || selectedFiles.size === 0) {
-            return;
-        }
-
-        try {
-            createFolderButton.disabled = true;
-            createFolderButton.innerHTML = `
-                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                正在复制...
-            `;
-
-            const response = await fetch('/api/create-folder-and-copy', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    folderName: folderName,
-                    filePaths: Array.from(selectedFiles)
-                })
-            });
-
-            const data = await response.json();
-
-            if (data.error) {
-                throw new Error(data.error);
-            }
-
-            // 显示成功消息
-            alert(data.message);
-            
-            // 清空选择
-            selectedFiles.clear();
-            document.querySelectorAll('.file-item').forEach(item => {
-                item.classList.remove('selected');
-            });
-            selectAllPhotos.checked = false;
-            selectAllVideos.checked = false;
-            updateCopyButton();
-            
-            // 清空文件夹名称
-            folderNameInput.value = '';
-            createFolderButton.disabled = true;
-
-        } catch (error) {
-            console.error('Error creating folder and copying files:', error);
-            alert('创建文件夹或复制文件失败: ' + error.message);
-        } finally {
-            createFolderButton.innerHTML = '创建文件夹并复制文件';
-            createFolderButton.disabled = !folderNameInput.value.trim() || selectedFiles.size === 0;
-        }
-    });
-    
-    // 更新按钮状态
-    function updateCopyButton() {
-        const hasSelectedFiles = selectedFiles.size > 0;
-        copyButton.disabled = !hasSelectedFiles;
-        createFolderButton.disabled = !hasSelectedFiles || !folderNameInput.value.trim();
-    }
-    
-    // 复制选中的文件
     async function copySelectedFiles() {
         try {
+            console.log('开始复制文件');
+            console.log('目标文件夹:', targetFolder);
+            console.log('选中的文件:', Array.from(selectedFiles));
+            
+            if (!targetFolder) {
+                console.error('目标文件夹未设置');
+                throw new Error('未指定目标文件夹');
+            }
+            
             const response = await fetch('/api/copy-files', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    files: Array.from(selectedFiles)
+                    files: Array.from(selectedFiles),
+                    targetFolder: targetFolder
                 })
             });
             
+            console.log('服务器响应状态:', response.status);
             const data = await response.json();
+            console.log('服务器响应数据:', data);
             
             if (data.error) {
                 throw new Error(data.error);
             }
             
             // 显示复制结果
-            let message = '';
-            if (data.success.length > 0) {
-                message += `成功复制 ${data.success.length} 个文件\n`;
-            }
-            if (data.failed.length > 0) {
-                message += `失败 ${data.failed.length} 个文件\n`;
-                data.failed.forEach(item => {
-                    message += `${item.file}: ${item.error}\n`;
+            let message = data.message;
+            if (data.warning) {
+                message += '\n' + data.warning;
+                data.failedFiles.forEach(item => {
+                    message += `\n${item.file}: ${item.error}`;
                 });
             }
             
@@ -453,19 +392,144 @@ document.addEventListener('DOMContentLoaded', function() {
             document.querySelectorAll('.file-item').forEach(item => {
                 item.classList.remove('selected');
             });
-            updateCopyButton();
+            updateSelectAllState();
             
         } catch (error) {
-            console.error('Error copying files:', error);
+            console.error('复制文件时出错:', error);
+            console.error('错误堆栈:', error.stack);
             alert('复制文件失败: ' + error.message);
         }
     }
     
-    // 格式化文件大小
+    function initializeDropZone() {
+        dropZone.addEventListener('click', () => {
+            folderInput.click();
+        });
+
+        folderInput.addEventListener('change', (event) => {
+            const files = event.target.files;
+            if (files.length > 0) {
+                const file = files[0];
+                targetFolder = file.path;
+                updateDropZoneText(file.name);
+            }
+        });
+
+        dropZone.addEventListener('dragover', (event) => {
+            event.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+
+        dropZone.addEventListener('dragleave', (event) => {
+            event.preventDefault();
+            dropZone.classList.remove('drag-over');
+        });
+
+        dropZone.addEventListener('drop', async (event) => {
+            event.preventDefault();
+            dropZone.classList.remove('drag-over');
+            console.log('文件拖放事件触发');
+
+            const items = event.dataTransfer.items;
+            console.log('拖放项数量:', items.length);
+            
+            for (let item of items) {
+                console.log('处理拖放项:', {
+                    kind: item.kind,
+                    type: item.type
+                });
+                
+                if (item.kind === 'file') {
+                    const entry = item.webkitGetAsEntry();
+                    console.log('文件系统入口:', {
+                        isDirectory: entry?.isDirectory,
+                        name: entry?.name,
+                        fullPath: entry?.fullPath
+                    });
+                    
+                    if (entry && entry.isDirectory) {
+                        try {
+                            const response = await fetch('/api/get-folder-path', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                },
+                                body: JSON.stringify({
+                                    folderName: entry.name,
+                                    fullPath: entry.fullPath,
+                                    modificationTime: event.dataTransfer.files[0].lastModified,
+                                    size: event.dataTransfer.files[0].size
+                                })
+                            });
+
+                            const data = await response.json();
+                            if (data.error) {
+                                throw new Error(data.error);
+                            }
+
+                            targetFolder = data.path;
+                            console.log('获取到目标文件夹路径:', targetFolder);
+                            
+                            // 检查是否有选中的文件
+                            if (selectedFiles.size > 0) {
+                                updateDropZoneText(entry.name);
+                                await copySelectedFiles();
+                            } else {
+                                alert('请先选择要复制的文件，然后再次拖入目标文件夹。');
+                            }
+                        } catch (error) {
+                            console.error('获取文件夹路径失败:', error);
+                            alert('获取文件夹路径失败: ' + error.message);
+                        }
+                        break;
+                    }
+                }
+            }
+        });
+    }
+    
+    function updateDropZoneText(folderName) {
+        if (folderName) {
+            dropZone.textContent = `已选择文件夹: ${folderName}`;
+        } else {
+            dropZone.textContent = '拖放文件夹到这里或点击选择';
+        }
+    }
+    
+    function updateFileCount() {
+        const photoCount = photoList.querySelectorAll('.file-item').length;
+        const videoCount = videoList.querySelectorAll('.file-item').length;
+        document.getElementById('photoCount').textContent = `照片 (${photoCount})`;
+        document.getElementById('videoCount').textContent = `视频 (${videoCount})`;
+    }
+    
+    function updateSelectAllState() {
+        const photoItems = photoList.querySelectorAll('.file-item');
+        const videoItems = videoList.querySelectorAll('.file-item');
+        
+        let allPhotosSelected = true;
+        let allVideosSelected = true;
+        
+        photoItems.forEach(item => {
+            if (!item.classList.contains('selected')) {
+                allPhotosSelected = false;
+            }
+        });
+        
+        videoItems.forEach(item => {
+            if (!item.classList.contains('selected')) {
+                allVideosSelected = false;
+            }
+        });
+        
+        selectAllPhotos.checked = allPhotosSelected && photoItems.length > 0;
+        selectAllVideos.checked = allVideosSelected && videoItems.length > 0;
+    }
+    
     function formatFileSize(bytes) {
         if (bytes === 0) return '0 B';
         const k = 1024;
-        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }

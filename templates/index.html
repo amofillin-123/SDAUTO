@@ -34,25 +34,83 @@
         }
         
         .file-item {
-            display: flex;
-            align-items: center;
-            padding: 0.5rem;
-            border: 1px solid #dee2e6;
+            padding: 10px;
+            border: 1px solid #ddd;
             border-radius: 4px;
             cursor: pointer;
-            transition: all 0.2s;
-            background: white;
+            transition: all 0.2s ease-in-out;
             position: relative;
         }
         
         .file-item:hover {
             background-color: #f8f9fa;
-            border-color: #adb5bd;
+            border-color: #dee2e6;
         }
         
         .file-item.selected {
-            background-color: #e9ecef;
-            border-color: #0d6efd;
+            background-color: #e7f1ff;
+            border-color: #3b82f6;
+        }
+        
+        .file-name {
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+        
+        .file-info {
+            color: #6c757d;
+            font-size: 0.875rem;
+        }
+
+        .thumbnail-container img {
+            border-radius: 4px;
+        }
+
+        .btn-link {
+            padding: 4px 8px;
+            color: #6c757d;
+            text-decoration: none;
+            opacity: 0;
+            transition: opacity 0.2s ease-in-out, color 0.2s ease-in-out;
+            background: none !important;
+            border: none !important;
+        }
+
+        .file-item:hover .btn-link {
+            opacity: 1;
+        }
+
+        .btn-link:hover {
+            color: #0d6efd;
+            background: none !important;
+        }
+
+        .btn-link.text-danger:hover {
+            color: #dc3545 !important;
+            background: none !important;
+        }
+
+        .btn-link:focus {
+            box-shadow: none !important;
+            background: none !important;
+        }
+
+        /* 选中状态下的按钮样式 */
+        .file-item.selected .btn-link {
+            opacity: 1;
+            color: #3b82f6;
+        }
+
+        .file-item.selected .btn-link:hover {
+            color: #1d4ed8;
+        }
+
+        .file-item.selected .btn-link.text-danger {
+            color: #dc3545;
+        }
+
+        .file-item.selected .btn-link.text-danger:hover {
+            color: #b91c1c !important;
         }
 
         .delete-btn, .open-location-btn {
@@ -170,11 +228,48 @@
             color: #6c757d;
             font-weight: normal;
         }
+
+        .drop-zone {
+            border: 2px dashed #dee2e6;
+            border-radius: 8px;
+            padding: 2rem;
+            text-align: center;
+            background-color: #f8f9fa;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 1rem;
+        }
+
+        .drop-zone:hover {
+            border-color: #0d6efd;
+            background-color: #e9ecef;
+        }
+
+        .drop-zone.drag-over {
+            border-color: #0d6efd;
+            background-color: #e7f1ff;
+        }
+
+        .drop-zone-content {
+            color: #6c757d;
+        }
+
+        .drop-zone.drag-over .drop-zone-content {
+            color: #0d6efd;
+        }
     </style>
 </head>
 <body>
     <div class="container mt-4">
         <h1>文件筛选工具</h1>
+
+        <div id="dropZone" class="drop-zone">
+            <div class="drop-zone-content">
+                <i class="bi bi-folder2-open mb-2" style="font-size: 2rem;"></i>
+                <p class="mb-0">拖拽文件夹到这里，或点击选择目标文件夹</p>
+            </div>
+            <input type="file" id="folderInput" webkitdirectory directory hidden>
+        </div>
         
         <div class="row mt-4">
             <div class="col-md-3">
@@ -209,10 +304,6 @@
 
                         <button id="createFolder" class="btn btn-success mb-3 w-100" disabled>
                             创建文件夹并复制文件
-                        </button>
-                        
-                        <button id="copyFiles" class="btn btn-outline-primary w-100" disabled>
-                            复制到指定位置
                         </button>
                     </div>
                 </div>
