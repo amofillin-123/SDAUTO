@@ -1,3 +1,100 @@
+// 设备刷新和环境检查
+async function refreshDevices() {
+    try {
+        const response = await fetch('/api/devices');
+        const devices = await response.json();
+        const deviceContainer = document.getElementById('deviceContainer');
+        
+        if (!deviceContainer) {
+            console.error('设备容器元素未找到');
+            return;
+        }
+        
+        if (devices.length === 0) {
+            deviceContainer.innerHTML = `
+                <div class="alert alert-warning">
+                    未找到SD卡，请确保：<br>
+                    1. SD卡已正确插入读卡器<br>
+                    2. SD卡已被系统识别并挂载<br>
+                    3. SD卡中包含DCIM或视频文件夹
+                </div>`;
+            return;
+        }
+        
+        deviceContainer.innerHTML = devices.map(device => `
+            <div class="card mb-3">
+                <div class="card-body">
+                    <h5 class="card-title">${device.name}</h5>
+                    <p class="card-text">
+                        总容量: ${formatSize(device.total)}<br>
+                        已用: ${formatSize(device.used)}<br>
+                        可用: ${formatSize(device.free)}
+                    </p>
+                    <button class="btn btn-primary select-device" data-path="${device.path}">
+                        选择此设备
+                    </button>
+                </div>
+            </div>
+        `).join('');
+        
+        // 添加设备选择事件监听器
+        document.querySelectorAll('.select-device').forEach(button => {
+            button.addEventListener('click', function() {
+                const devicePath = this.getAttribute('data-path');
+                scanFiles(devicePath);
+            });
+        });
+    } catch (error) {
+        console.error('刷新设备列表时出错:', error);
+        const deviceContainer = document.getElementById('deviceContainer');
+        if (deviceContainer) {
+            deviceContainer.innerHTML = `
+                <div class="alert alert-danger">
+                    获取设备列表时出错: ${error.message}
+                </div>`;
+        }
+    }
+}
+
+// 检查运行环境
+async function checkEnvironment() {
+    try {
+        const response = await fetch('/api/environment');
+        const data = await response.json();
+        const cloudAlert = document.getElementById('cloudAlert');
+        
+        if (cloudAlert) {
+            cloudAlert.style.display = data.is_cloud ? 'block' : 'none';
+        }
+    } catch (error) {
+        console.error('检查环境时出错:', error);
+    }
+}
+
+// 格式化文件大小
+function formatSize(bytes) {
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = bytes;
+    let unitIndex = 0;
+    
+    while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024;
+        unitIndex++;
+    }
+    
+    return `${size.toFixed(2)} ${units[unitIndex]}`;
+}
+
+// 页面加载完成后初始化
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('页面加载完成，开始初始化...');
+    checkEnvironment();
+    refreshDevices();
+    
+    // 定期刷新设备列表
+    setInterval(refreshDevices, 5000);
+});
+
 document.addEventListener('DOMContentLoaded', function() {
     const deviceList = document.getElementById('deviceList');
     const refreshButton = document.getElementById('refreshDevices');
